@@ -1,0 +1,1172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dark Winged Demo</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #000;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: white;
+            cursor: crosshair;
+        }
+        canvas {
+            display: block;
+        }
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(10, 0, 0, 0.8);
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 0, 50, 0.3);
+            backdrop-filter: blur(5px);
+            pointer-events: none;
+            box-shadow: 0 0 15px rgba(255, 0, 50, 0.2);
+        }
+        h1 { margin: 0 0 10px 0; font-size: 1.5rem; color: #ff0033; text-transform: uppercase; letter-spacing: 2px;}
+        p { margin: 0; font-size: 0.9rem; color: #aaa; }
+        strong { color: #ff4444; }
+        
+        #action-bar {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 20px;
+            pointer-events: none;
+        }
+        .action-slot {
+            width: 60px;
+            height: 60px;
+            background: rgba(10, 20, 15, 0.8);
+            border: 2px solid #00e5ff;
+            border-radius: 8px;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 0 15px rgba(0, 229, 255, 0.3);
+            transition: all 0.2s;
+        }
+        .action-slot.cooldown {
+            border-color: #555;
+            box-shadow: none;
+            opacity: 0.4;
+        }
+        .keybind {
+            position: absolute;
+            top: -10px;
+            right: -10px;
+            background: #fff;
+            color: #000;
+            font-weight: bold;
+            font-size: 0.8rem;
+            padding: 2px 6px;
+            border-radius: 4px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+        }
+        .action-icon {
+            font-size: 1.5rem;
+            filter: drop-shadow(0 0 5px rgba(255,255,255,0.5));
+        }
+    </style>
+    <!-- Import Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+    <div id="ui">
+        <h1>Dark Winged Prototype</h1>
+        <p><strong>Right Click:</strong> Move</p>
+    </div>
+
+    <div id="action-bar">
+        <div class="action-slot" id="slot-t">
+            <div class="keybind">T</div>
+            <div class="action-icon">🌪️</div>
+        </div>
+        <div class="action-slot" id="slot-r">
+            <div class="keybind">R</div>
+            <div class="action-icon">⚡</div>
+        </div>
+        <div class="action-slot" id="slot-e">
+            <div class="keybind">E</div>
+            <div class="action-icon">🌀</div>
+        </div>
+        <div class="action-slot" id="slot-w">
+            <div class="keybind">W</div>
+            <div class="action-icon">🪶</div>
+        </div>
+        <div class="action-slot" id="slot-lclick">
+            <div class="keybind">L-Click</div>
+            <div class="action-icon">🗡️</div>
+        </div>
+        <div class="action-slot" id="slot-q">
+            <div class="keybind">Q</div>
+            <div class="action-icon">💨</div>
+        </div>
+    </div>
+
+    <script>
+        // --- Scene Setup (Dark Fantasy Forest) ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x1a2520); // Dark misty green
+        scene.fog = new THREE.Fog(0x1a2520, 50, 220); // Linear fog to allow viewing into the distance
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 50, 45); // Set initial position to prevent lerp spikes
+        
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = false; // Disabled to prevent WebGL crashes on some devices
+        document.body.appendChild(renderer.domElement);
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0x445566, 1.5); // Brightened ambient moon-glow
+        scene.add(ambientLight);
+
+        // Pale blue moonlight
+        const dirLight = new THREE.DirectionalLight(0xaaccff, 1.5);
+        dirLight.position.set(30, 60, 20);
+        dirLight.castShadow = true;
+        dirLight.shadow.camera.left = -80;
+        dirLight.shadow.camera.right = 80;
+        dirLight.shadow.camera.top = 80;
+        dirLight.shadow.camera.bottom = -80;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        scene.add(dirLight);
+
+        // Ground (Mossy forest floor)
+        const groundGeo = new THREE.PlaneGeometry(10000, 10000);
+        const groundMat = new THREE.MeshStandardMaterial({ color: 0x223322, roughness: 1.0, metalness: 0.0 });
+        const ground = new THREE.Mesh(groundGeo, groundMat);
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        // Grid for depth perception
+        const grid = new THREE.GridHelper(10000, 200, 0x000000, 0x112211);
+        grid.material.opacity = 0.5;
+        grid.material.transparent = true;
+        scene.add(grid);
+
+        // --- Procedural Dark Forest ---
+        const treeObjects = []; // Stores tree collision data
+        const fallingTrees = []; // Stores trees currently being broken
+
+        const treeTrunkGeo = new THREE.CylinderGeometry(0.5, 0.8, 15, 7);
+        const treeTrunkMat = new THREE.MeshStandardMaterial({ color: 0x332211, roughness: 1.0 });
+        const foliageGeo = new THREE.ConeGeometry(4, 15, 8);
+        const foliageMat = new THREE.MeshStandardMaterial({ color: 0x113322, roughness: 0.9 });
+
+        // Scatter 150 trees around the map
+        for(let i=0; i<150; i++) {
+            const x = (Math.random() - 0.5) * 350;
+            const z = (Math.random() - 0.5) * 350;
+            
+            // Keep the center clear so the player doesn't spawn inside a tree
+            if (Math.abs(x) < 15 && Math.abs(z) < 15) continue; 
+
+            const tree = new THREE.Group();
+            
+            const trunk = new THREE.Mesh(treeTrunkGeo, treeTrunkMat);
+            trunk.position.y = 7.5;
+            trunk.castShadow = true;
+            trunk.receiveShadow = true;
+            
+            const leaves = new THREE.Mesh(foliageGeo, foliageMat);
+            leaves.position.y = 15 + Math.random() * 5;
+            leaves.castShadow = true;
+            leaves.receiveShadow = true;
+
+            tree.add(trunk, leaves);
+            tree.position.set(x, 0, z);
+            
+            // Randomize rotation and scale to make the forest look organic
+            tree.rotation.y = Math.random() * Math.PI;
+            const treeScale = 0.7 + Math.random() * 0.8;
+            tree.scale.setScalar(treeScale);
+            
+            scene.add(tree);
+
+            // Store hitbox data
+            treeObjects.push({
+                group: tree,
+                x: x,
+                z: z,
+                radius: 1.2 * treeScale, // Scaled hitbox radius
+                active: true
+            });
+        }
+
+        // --- Target Dummies ---
+        const targetDummies = [];
+        const dummyGeo = new THREE.BoxGeometry(4, 4, 4);
+        
+        // Static Dummy (Red)
+        const dummy1 = new THREE.Mesh(dummyGeo, new THREE.MeshStandardMaterial({ color: 0xff0000, emissive: 0x330000 }));
+        dummy1.position.set(-8, 2, -25);
+        dummy1.castShadow = true;
+        scene.add(dummy1);
+        targetDummies.push({ mesh: dummy1, type: 'static', hitTimer: 0, knockbackVx: 0, knockbackVy: 0, knockbackVz: 0 });
+
+        // Moving Dummy (Blue)
+        const dummy2 = new THREE.Mesh(dummyGeo, new THREE.MeshStandardMaterial({ color: 0x0088ff, emissive: 0x002255 }));
+        dummy2.position.set(8, 2, -25);
+        dummy2.castShadow = true;
+        scene.add(dummy2);
+        targetDummies.push({ mesh: dummy2, type: 'moving', hitTimer: 0, knockbackVx: 0, knockbackVy: 0, knockbackVz: 0, movePhase: 0 });
+
+        // --- Player Setup ---
+        const playerGroup = new THREE.Group();
+
+        // Dynamic Glowing Light attached to the player
+        const playerLight = new THREE.PointLight(0xffffff, 2.0, 40);
+        playerLight.position.y = 2;
+        playerGroup.add(playerLight);
+
+        // Emissive White Octahedron Body
+        const bodyMat = new THREE.MeshStandardMaterial({ 
+            color: 0xffffff, 
+            emissive: 0xffffff, 
+            emissiveIntensity: 0.4, 
+            metalness: 0.2, 
+            roughness: 0.6 
+        });
+        const body = new THREE.Mesh(new THREE.OctahedronGeometry(1.2, 0), bodyMat);
+        body.position.y = 2; // Hovering
+        body.castShadow = true;
+        playerGroup.add(body);
+
+        // Bright Glowing Core
+        const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.8, 0), new THREE.MeshBasicMaterial({color: 0xffffff}));
+        core.position.y = 2;
+        playerGroup.add(core);
+
+        // Highly Realistic Bird Wings (Flattened Cones)
+        function createFeather(length, width) {
+            // Pointy tip (0.01), wide base (width)
+            const geo = new THREE.CylinderGeometry(0.01, width, length, 8);
+            geo.rotateZ(-Math.PI / 2); // Pointy tip at +X, base at -X
+            geo.translate(length / 2, 0, 0); // Shift so base is at origin 0,0,0
+            geo.scale(1, 0.1, 1); // Flatten heavily into a blade/feather shape
+            return geo;
+        }
+
+        function createFeatheredWing(isRight) {
+            const wingGroup = new THREE.Group();
+            const innerWing = new THREE.Group();
+            const outerWing = new THREE.Group();
+            
+            const sign = isRight ? 1 : -1;
+            const baseRot = isRight ? 0 : Math.PI;
+            const sweepDir = isRight ? -1 : 1; 
+            
+            // Outer wing attaches at the "wrist"
+            outerWing.position.set(sign * 2.5, 0, 0); 
+            innerWing.add(outerWing);
+            wingGroup.add(innerWing);
+
+            // Emissive feathers so the wings glow in the dark
+            const featherMat = new THREE.MeshStandardMaterial({ 
+                color: 0xffffff, 
+                emissive: 0xffffff,
+                emissiveIntensity: 0.25,
+                roughness: 0.9, 
+                metalness: 0.1, 
+                side: THREE.DoubleSide 
+            });
+            
+            // Secondaries (Inner Wing) - Swept deeply backwards
+            const innerFeatherGeo = createFeather(3.8, 0.6);
+            for (let i = 0; i < 9; i++) {
+                const f = new THREE.Mesh(innerFeatherGeo, featherMat);
+                // Sweep backwards heavily. Angle ranges from ~72 degrees back to ~50 degrees back.
+                f.rotation.y = baseRot + sweepDir * (Math.PI / 2.5 - i * 0.05); 
+                f.position.set(0, -i * 0.04, i * 0.15); 
+                f.castShadow = true;
+                innerWing.add(f);
+            }
+
+            // Primaries (Outer Wing) - Fanning outward and backward to form the wingtip
+            const outerFeatherGeo = createFeather(5.0, 0.6);
+            for (let i = 0; i < 7; i++) {
+                const f = new THREE.Mesh(outerFeatherGeo, featherMat);
+                f.scale.set(1.0 + (i * 0.15), 1, 1); // Feathers get longer at the wingtip
+                // Start pointing mostly outwards, gently sweeping backwards
+                f.rotation.y = baseRot + sweepDir * (0.05 + i * 0.15); 
+                f.position.set(0, -0.05 - (i * 0.05), i * 0.15);
+                f.castShadow = true;
+                outerWing.add(f);
+            }
+
+            // Coverts (Top overlapping layer)
+            const covertGeo = createFeather(2.5, 0.4);
+            for (let i = 0; i < 7; i++) {
+                const f = new THREE.Mesh(covertGeo, featherMat);
+                f.rotation.y = baseRot + sweepDir * (Math.PI / 3 - i * 0.08);
+                f.position.set(0, 0.1, i * 0.15); 
+                f.castShadow = true;
+                innerWing.add(f);
+            }
+
+            wingGroup.scale.set(1.1, 1.1, 1.1); 
+
+            return { root: wingGroup, inner: innerWing, outer: outerWing };
+        }
+
+        const leftWingObj = createFeatheredWing(false);
+        leftWingObj.root.position.set(-2.0, 2, 0); 
+        
+        const rightWingObj = createFeatheredWing(true);
+        rightWingObj.root.position.set(2.0, 2, 0); 
+
+        playerGroup.add(leftWingObj.root, rightWingObj.root);
+        scene.add(playerGroup);
+
+        // --- Input & Game State ---
+        let targetPos = new THREE.Vector3(0, 0, 0);
+        let isMoving = false;
+        let targetFacingAngle = 0;
+        let currentFlapPhase = 0;
+        let currentFlapSpeed = 5;
+        let currentFlapAmount = 0.2;
+        
+        let attackCooldown = 0;
+        let attackAnimSweep = 0; // Spring value
+        let attackAnimVel = 0;   // Spring velocity
+        let fogCooldown = 0;
+        let fogAnimSlam = 0; // Spring value for vertical flap
+        let fogAnimVel = 0;  // Spring velocity
+
+        let featherCooldown = 0;
+        let vortexCooldown = 0;
+        let beamCooldown = 0;
+        let tornadoCooldown = 0;
+
+        let isChargingBeam = false;
+        let beamChargeTimer = 0;
+        let beamTargetAngle = 0;
+        let beamOrb = null;
+
+        let animState = 'idle'; 
+        let animTimer = 0;
+        let cameraShake = 0;
+
+        const projectiles = [];
+        const clickIndicators = [];
+
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        const mousePosOnGround = new THREE.Vector3(0, 0, 0);
+
+        window.addEventListener('contextmenu', e => e.preventDefault());
+
+        // Continuously track mouse position on the ground for aiming
+        window.addEventListener('mousemove', (e) => {
+            mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+            
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObject(ground);
+            if (intersects.length > 0) {
+                mousePosOnGround.copy(intersects[0].point);
+            }
+        });
+
+        window.addEventListener('keydown', (e) => {
+            if ((e.key === 'q' || e.key === 'Q') && fogCooldown <= 0 && !isChargingBeam) {
+                isMoving = false;
+                fogCooldown = 5.0; // 5 second cooldown for fog
+                
+                // Aim directly at the current mouse position
+                const dx = mousePosOnGround.x - playerGroup.position.x;
+                const dz = mousePosOnGround.z - playerGroup.position.z;
+                targetFacingAngle = Math.atan2(dx, dz);
+                
+                // Spring violently upwards. It will seamlessly bounce down into a slam via physics
+                fogAnimVel -= 35.0; 
+                spawnFogAttack();
+            }
+            if ((e.key === 'w' || e.key === 'W') && featherCooldown <= 0 && !isChargingBeam) {
+                isMoving = false;
+                featherCooldown = 6.0;
+                animState = 'summoning_storm';
+                animTimer = 0.5;
+                spawnFeatherStorm(mousePosOnGround.clone());
+            }
+            if ((e.key === 'e' || e.key === 'E') && vortexCooldown <= 0 && !isChargingBeam) {
+                isMoving = false;
+                vortexCooldown = 8.0;
+                const dx = mousePosOnGround.x - playerGroup.position.x;
+                const dz = mousePosOnGround.z - playerGroup.position.z;
+                targetFacingAngle = Math.atan2(dx, dz);
+                animState = 'vortex_cast';
+                animTimer = 0.5;
+                spawnVortex(targetFacingAngle);
+            }
+            if ((e.key === 'r' || e.key === 'R') && beamCooldown <= 0 && !isChargingBeam) {
+                isMoving = false;
+                beamCooldown = 12.0;
+                const dx = mousePosOnGround.x - playerGroup.position.x;
+                const dz = mousePosOnGround.z - playerGroup.position.z;
+                targetFacingAngle = Math.atan2(dx, dz);
+                beamTargetAngle = targetFacingAngle;
+                isChargingBeam = true;
+                beamChargeTimer = 1.0;
+            }
+            if ((e.key === 't' || e.key === 'T') && tornadoCooldown <= 0 && !isChargingBeam) {
+                isMoving = false;
+                tornadoCooldown = 10.0;
+                const dx = mousePosOnGround.x - playerGroup.position.x;
+                const dz = mousePosOnGround.z - playerGroup.position.z;
+                targetFacingAngle = Math.atan2(dx, dz);
+                animState = 'tornado_spin';
+                animTimer = 0.8;
+                spawnTornado(targetFacingAngle);
+            }
+        });
+
+        window.addEventListener('mousedown', (e) => {
+            mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+            
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObject(ground);
+            
+            if (intersects.length > 0) {
+                const pt = intersects[0].point;
+                
+                if (e.button === 2) {
+                    // Right Click: Move
+                    targetPos.copy(pt);
+                    isMoving = true;
+                    spawnClickIndicator(pt.x, pt.z);
+                } else if (e.button === 0) {
+                    // Left Click: Attack
+                    if (attackCooldown <= 0) {
+                        isMoving = false; // Halt to attack
+                        attackCooldown = 0.3; // 0.3 second cooldown
+                        // Apply strong forward velocity to the wing sweep spring
+                        attackAnimVel += 25.0; 
+                        spawnWindAttack(pt.x, pt.z);
+                    }
+                }
+            }
+        });
+
+        function spawnClickIndicator(x, z) {
+            const mesh = new THREE.Mesh(
+                new THREE.RingGeometry(0.1, 0.4, 32),
+                new THREE.MeshBasicMaterial({ color: 0x00e5ff, transparent: true, side: THREE.DoubleSide })
+            );
+            mesh.rotation.x = -Math.PI / 2;
+            mesh.position.set(x, 0.1, z);
+            scene.add(mesh);
+            clickIndicators.push({ mesh: mesh, life: 0.4, maxLife: 0.4 });
+        }
+
+        // --- Wind Slash Attack ---
+        function spawnWindAttack(targetX, targetZ) {
+            const dx = targetX - playerGroup.position.x;
+            const dz = targetZ - playerGroup.position.z;
+            const angle = Math.atan2(dx, dz);
+
+            // Update target angle to turn smoothly instead of snapping instantly
+            targetFacingAngle = angle;
+
+            const windGroup = new THREE.Group();
+            
+            // Solid, sharp white spike shooting forward
+            const geo = new THREE.ConeGeometry(0.6, 6.0, 16); 
+            // Cone defaults pointing up (+Y). Rotate so tip points forward (+Z)
+            geo.rotateX(Math.PI / 2);
+            
+            const mat = new THREE.MeshStandardMaterial({ 
+                color: 0xffffff, 
+                emissive: 0xffffff,
+                emissiveIntensity: 0.8,
+                transparent: true, 
+                opacity: 0.9 
+            });
+            const slash = new THREE.Mesh(geo, mat);
+
+            // Inner bright core of the spike
+            const innerGeo = new THREE.ConeGeometry(0.25, 6.2, 8);
+            innerGeo.rotateX(Math.PI / 2);
+            const innerMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 });
+            const innerSlash = new THREE.Mesh(innerGeo, innerMat);
+            
+            windGroup.add(slash, innerSlash);
+
+            // Wind dust particles trailing behind the slash
+            const particles = [];
+            for(let i=0; i<15; i++) {
+                const pMesh = new THREE.Mesh(
+                    new THREE.SphereGeometry(0.1 + Math.random()*0.1, 8, 8), 
+                    new THREE.MeshBasicMaterial({color: 0xffffff, transparent: true, opacity: 0.6})
+                );
+                pMesh.position.set((Math.random()-0.5)*4, (Math.random()-0.5)*1, 0); // Start clustered near blade
+                windGroup.add(pMesh);
+                
+                particles.push({
+                    mesh: pMesh,
+                    vx: (Math.random()-0.5)*5, 
+                    vy: (Math.random()-0.5)*2,
+                    vz: -Math.random()*15 // Blow backwards from the blade
+                });
+            }
+
+            windGroup.position.copy(playerGroup.position);
+            windGroup.position.y = 2;
+            windGroup.rotation.y = angle; 
+
+            scene.add(windGroup);
+
+            projectiles.push({
+                type: 'spike',
+                group: windGroup,
+                slash: slash,
+                innerSlash: innerSlash,
+                particles: particles,
+                vx: Math.sin(angle) * 60, // Faster travel
+                vz: Math.cos(angle) * 60,
+                life: 15.0 // Effectively infinite range across the map
+            });
+        }
+
+        // --- Dynamic Fog Attack ---
+        function spawnFogAttack() {
+            const angle = targetFacingAngle;
+            const fogGroup = new THREE.Group();
+            
+            const fogParticles = [];
+            
+            // Soft, expanding dodecahedrons acting as chaotic gas
+            const geo = new THREE.DodecahedronGeometry(2.0, 1);
+            
+            for(let i=0; i<35; i++) {
+                const mat = new THREE.MeshStandardMaterial({ 
+                    color: 0xffffff, 
+                    emissive: 0xcccccc,
+                    transparent: true, 
+                    opacity: 0.8,
+                    roughness: 1.0
+                });
+                const mesh = new THREE.Mesh(geo, mat);
+                
+                mesh.position.set((Math.random()-0.5)*4, (Math.random()-0.5)*2, (Math.random()-0.5)*4);
+                mesh.rotation.set(Math.random()*Math.PI, Math.random()*Math.PI, Math.random()*Math.PI);
+                
+                fogGroup.add(mesh);
+                
+                fogParticles.push({
+                    mesh: mesh,
+                    angleOffset: Math.random() * Math.PI * 2,
+                    swirlSpeed: (Math.random() - 0.5) * 8.0,
+                    radiusStart: Math.random() * 2.5,
+                    expansionRate: 2.0 + Math.random() * 4.0,
+                    scaleRate: 1.0 + Math.random() * 2.5
+                });
+            }
+
+            fogGroup.position.copy(playerGroup.position);
+            fogGroup.position.y = 2;
+            
+            scene.add(fogGroup);
+
+            projectiles.push({
+                type: 'fog',
+                group: fogGroup,
+                fogParticles: fogParticles,
+                vx: Math.sin(angle) * 35, // Slower moving wall of fog
+                vz: Math.cos(angle) * 35,
+                life: 4.0, // Lasts 4 seconds
+                maxLife: 4.0
+            });
+        }
+
+        // --- 4 New Abilities ---
+        function spawnFeatherStorm(targetPos) {
+            // Giant glowing summoning circle in the sky
+            const circleGeo = new THREE.RingGeometry(8, 10, 32);
+            const circleMat = new THREE.MeshBasicMaterial({ color: 0x00ffff, side: THREE.DoubleSide, transparent: true, opacity: 0.9 });
+            const circle = new THREE.Mesh(circleGeo, circleMat);
+            circle.position.set(targetPos.x, 25, targetPos.z);
+            circle.rotation.x = Math.PI / 2;
+            scene.add(circle);
+
+            projectiles.push({
+                type: 'feather_storm',
+                x: targetPos.x,
+                z: targetPos.z,
+                circle: circle,
+                life: 3.0,
+                maxLife: 3.0,
+                tick: 0
+            });
+        }
+
+        function spawnVortex(angle) {
+            const dist = 20;
+            const vx = playerGroup.position.x + Math.sin(angle) * dist;
+            const vz = playerGroup.position.z + Math.cos(angle) * dist;
+            
+            const vGroup = new THREE.Group();
+            vGroup.position.set(vx, 2, vz);
+            
+            // Black hole core
+            const coreMesh = new THREE.Mesh(new THREE.SphereGeometry(3, 16, 16), new THREE.MeshBasicMaterial({ color: 0x000000 }));
+            vGroup.add(coreMesh);
+
+            // Chaotic spinning accretion rings
+            for(let i=0; i<6; i++) {
+                const ring = new THREE.Mesh(
+                    new THREE.TorusGeometry(4 + Math.random()*6, 0.1 + Math.random()*0.4, 8, 32),
+                    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8 })
+                );
+                ring.rotation.set(Math.random()*Math.PI, Math.random()*Math.PI, Math.random()*Math.PI);
+                ring.userData = { rx: (Math.random()-0.5)*15, ry: (Math.random()-0.5)*15, rz: (Math.random()-0.5)*15 };
+                vGroup.add(ring);
+            }
+            scene.add(vGroup);
+            
+            projectiles.push({ type: 'vortex', group: vGroup, life: 4.0, maxLife: 4.0 });
+        }
+
+        function fireBeam(angle) {
+            const beamMesh = new THREE.Mesh(
+                new THREE.CylinderGeometry(2.5, 2.5, 150, 24),
+                new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true })
+            );
+            beamMesh.rotation.x = Math.PI / 2;
+            const beamGroup = new THREE.Group();
+            beamGroup.add(beamMesh);
+            beamMesh.position.z = 75; 
+
+            beamGroup.position.copy(playerGroup.position);
+            beamGroup.position.y = 2;
+            beamGroup.rotation.y = angle;
+            scene.add(beamGroup);
+
+            // Heavy Recoil physics
+            playerGroup.position.x -= Math.sin(angle) * 12;
+            playerGroup.position.z -= Math.cos(angle) * 12;
+            cameraShake = 0.6; // 0.6 seconds of violent screen shake
+
+            projectiles.push({ type: 'beam', group: beamGroup, life: 0.6, maxLife: 0.6 });
+        }
+
+        function spawnTornado(angle) {
+            const tGroup = new THREE.Group();
+            const particles = [];
+            
+            // Build tornado out of dozens of spinning vertical segments
+            for(let i=0; i<50; i++) {
+                const pMesh = new THREE.Mesh(
+                    new THREE.BoxGeometry(0.8, 2.5, 0.8),
+                    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8 })
+                );
+                const h = Math.random() * 25; // Height scaling up to 25
+                const angOffset = Math.random() * Math.PI * 2;
+                pMesh.position.y = h;
+                tGroup.add(pMesh);
+                particles.push({ mesh: pMesh, h: h, ang: angOffset });
+            }
+            
+            tGroup.position.copy(playerGroup.position);
+            scene.add(tGroup);
+
+            projectiles.push({
+                type: 'tornado', group: tGroup, particles: particles,
+                vx: Math.sin(angle) * 20, vz: Math.cos(angle) * 20,
+                life: 5.0, maxLife: 5.0
+            });
+        }
+
+        // --- Main Game Loop ---
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            // Clamp dt to 0.05 max to prevent physics/lerp explosions on lag spikes
+            const dt = Math.min(clock.getDelta(), 0.05);
+            const time = clock.getElapsedTime();
+
+            // Movement Logic
+            if (isChargingBeam) {
+                beamChargeTimer -= dt;
+                
+                // Expand pulsing orb between wings
+                if (!beamOrb) {
+                    beamOrb = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 16), new THREE.MeshBasicMaterial({color: 0xffffff}));
+                    playerGroup.add(beamOrb);
+                    beamOrb.position.set(0, 2, 3); // Slightly in front of body
+                }
+                const chargeProgress = 1.0 - beamChargeTimer; // 0 to 1
+                beamOrb.scale.setScalar(chargeProgress * 5 + Math.random()*0.5); // pulsate
+                
+                // Visual charge sucking particles
+                if (Math.random() > 0.3) {
+                    const c = new THREE.Mesh(new THREE.BoxGeometry(0.8,0.8,0.8), new THREE.MeshBasicMaterial({color: 0xffffff}));
+                    const ang = Math.random() * Math.PI * 2;
+                    c.position.set(
+                        playerGroup.position.x + Math.sin(ang)*8,
+                        playerGroup.position.y + (Math.random()-0.5)*8,
+                        playerGroup.position.z + Math.cos(ang)*8
+                    );
+                    scene.add(c);
+                    clickIndicators.push({ mesh: c, life: 0.15, maxLife: 0.15 });
+                }
+
+                // Force wings to point forward slowly like a cannon
+                attackAnimSweep += (Math.PI / 2.2 - attackAnimSweep) * 10 * dt; 
+                
+                if (beamChargeTimer <= 0) {
+                    isChargingBeam = false;
+                    if (beamOrb) {
+                        playerGroup.remove(beamOrb);
+                        beamOrb = null;
+                    }
+                    fireBeam(beamTargetAngle);
+                    attackAnimVel = -50; // Massive backward recoil spring!
+                }
+            } else if (isMoving) {
+                const dx = targetPos.x - playerGroup.position.x;
+                const dz = targetPos.z - playerGroup.position.z;
+                const dist = Math.sqrt(dx*dx + dz*dz);
+                
+                if (dist < 0.5) {
+                    isMoving = false;
+                } else {
+                    const speed = 20 * dt;
+                    const nextX = playerGroup.position.x + (dx/dist) * speed;
+                    const nextZ = playerGroup.position.z + (dz/dist) * speed;
+                    
+                    // Collision check with active trees
+                    let hitTree = false;
+                    for (let tree of treeObjects) {
+                        if (!tree.active) continue;
+                        const distToTree = Math.hypot(nextX - tree.x, nextZ - tree.z);
+                        if (distToTree < tree.radius + 1.2) { // 1.2 is player bounding radius
+                            hitTree = true;
+                            break;
+                        }
+                    }
+
+                    if (!hitTree) {
+                        playerGroup.position.x = nextX;
+                        playerGroup.position.z = nextZ;
+                        targetFacingAngle = Math.atan2(dx, dz);
+                    } else {
+                        // Stop moving if colliding
+                        isMoving = false;
+                    }
+                }
+            }
+
+            // Universal Smooth Turning (Ensures smooth rotation whether moving or attacking)
+            let diff = targetFacingAngle - playerGroup.rotation.y;
+            while (diff < -Math.PI) diff += Math.PI * 2;
+            while (diff > Math.PI) diff -= Math.PI * 2;
+            playerGroup.rotation.y += diff * 18 * dt;
+
+            // Smooth Wing Flapping Animation Transition
+            const targetFlapSpeed = isMoving ? 18 : 4; 
+            const targetFlapAmount = isMoving ? 0.6 : 0.15;
+            
+            currentFlapSpeed += (targetFlapSpeed - currentFlapSpeed) * 6 * dt;
+            currentFlapAmount += (targetFlapAmount - currentFlapAmount) * 6 * dt;
+            currentFlapPhase += currentFlapSpeed * dt;
+            
+            // Physics-based Spring for the Wing Sweep Animation (Smooth and Spammable)
+            const stiffness = 250.0;
+            const damping = 15.0;
+            const springForce = -stiffness * attackAnimSweep - damping * attackAnimVel;
+            attackAnimVel += springForce * dt;
+            attackAnimSweep += attackAnimVel * dt;
+
+            // Physics-based Spring for the Fog Slam Animation (Buttery Smooth!)
+            const fogStiffness = 180.0;
+            const fogDamping = 12.0;
+            const fogSpringForce = -fogStiffness * fogAnimSlam - fogDamping * fogAnimVel;
+            fogAnimVel += fogSpringForce * dt;
+            fogAnimSlam += fogAnimVel * dt;
+
+            // Apply forward sweep from basic attack
+            leftWingObj.root.rotation.y = attackAnimSweep;
+            rightWingObj.root.rotation.y = -attackAnimSweep;
+
+            const innerZ = Math.sin(currentFlapPhase) * currentFlapAmount;
+            const outerZ = Math.sin(currentFlapPhase - 1.5) * currentFlapAmount * 1.2; 
+            const twistX = Math.cos(currentFlapPhase) * (currentFlapAmount * 0.33); 
+
+            // Apply articulated flap combined with physics fog slam
+            leftWingObj.inner.rotation.z = -innerZ - fogAnimSlam;
+            leftWingObj.inner.rotation.x = twistX;
+            leftWingObj.outer.rotation.z = -outerZ - fogAnimSlam * 1.5; 
+            
+            rightWingObj.inner.rotation.z = innerZ + fogAnimSlam;
+            rightWingObj.inner.rotation.x = twistX;
+            rightWingObj.outer.rotation.z = outerZ + fogAnimSlam * 1.5; 
+            
+            // Hover Bobbing and Spin
+            playerGroup.position.y = 2 + Math.sin(time * 3) * 0.3;
+            body.rotation.y = time;
+            body.rotation.z = time * 0.5;
+
+            // Complex Animation Overrides!
+            if (animTimer > 0) {
+                animTimer -= dt;
+                const p = animTimer / 0.8; // Normalized approx progress
+                
+                if (animState === 'summoning_storm') {
+                    // Left wing points straight up, right wing wraps body
+                    leftWingObj.inner.rotation.z = -Math.PI / 1.5;
+                    rightWingObj.inner.rotation.z = Math.PI / 2;
+                    rightWingObj.root.rotation.y = -Math.PI / 2; // wrap
+                    body.rotation.y += time * 10; // dramatic spin
+                } else if (animState === 'vortex_cast') {
+                    // Wings crossed in an X over chest
+                    leftWingObj.inner.rotation.z = Math.PI / 3;
+                    leftWingObj.root.rotation.y = Math.PI / 3;
+                    rightWingObj.inner.rotation.z = -Math.PI / 3;
+                    rightWingObj.root.rotation.y = -Math.PI / 3;
+                } else if (animState === 'tornado_spin') {
+                    // Aerial backflips and huge wing spread
+                    playerGroup.position.y += Math.sin(p * Math.PI) * 10;
+                    body.rotation.x += time * 20; // violent frontflips
+                    body.rotation.y += time * 25; // violent spin
+                    leftWingObj.inner.rotation.z = -Math.PI / 4;
+                    rightWingObj.inner.rotation.z = Math.PI / 4;
+                }
+            } else {
+                animState = 'idle';
+            }
+
+            // Target Dummies Feedback and Movement
+            targetDummies.forEach(d => {
+                // Apply physics knockback from Dash Blast & CC
+                if (Math.abs(d.knockbackVx) > 0.1 || Math.abs(d.knockbackVz) > 0.1 || Math.abs(d.knockbackVy) > 0.1 || d.mesh.position.y > 2) {
+                    d.mesh.position.x += d.knockbackVx * dt;
+                    d.mesh.position.z += d.knockbackVz * dt;
+                    d.mesh.position.y += d.knockbackVy * dt;
+                    
+                    // Gravity and floor collision
+                    d.knockbackVy -= 80.0 * dt; 
+                    if (d.mesh.position.y <= 2) {
+                        d.mesh.position.y = 2;
+                        d.knockbackVy = 0;
+                        // Heavy ground friction only applies when touching ground
+                        d.knockbackVx *= 0.85;
+                        d.knockbackVz *= 0.85;
+                    } else {
+                        // Air resistance
+                        d.knockbackVx *= 0.98;
+                        d.knockbackVz *= 0.98;
+                    }
+                }
+
+                if (d.hitTimer > 0) {
+                    d.hitTimer -= dt;
+                    d.mesh.material.emissive.setHex(0xffffff); // Flash bright white
+                    d.mesh.scale.setScalar(1.2 + Math.random() * 0.2); // Violent scale shaking
+                    d.mesh.rotation.x = (Math.random() - 0.5) * 0.5; // Jiggle
+                    d.mesh.rotation.z = (Math.random() - 0.5) * 0.5;
+                } else {
+                    d.mesh.material.emissive.setHex(d.type === 'static' ? 0x330000 : 0x002255); // Return to original color
+                    // Smoothly lerp back to resting state
+                    const s = d.mesh.scale.x + (1.0 - d.mesh.scale.x) * 15 * dt;
+                    d.mesh.scale.setScalar(s);
+                    d.mesh.rotation.x *= 0.8;
+                    d.mesh.rotation.z *= 0.8;
+                }
+            });
+
+            // Cooldowns and UI updates
+            if (attackCooldown > 0) {
+                attackCooldown -= dt;
+                document.getElementById('slot-lclick').classList.add('cooldown');
+            } else {
+                document.getElementById('slot-lclick').classList.remove('cooldown');
+            }
+
+            if (fogCooldown > 0) {
+                fogCooldown -= dt;
+                document.getElementById('slot-q').classList.add('cooldown');
+            } else {
+                document.getElementById('slot-q').classList.remove('cooldown');
+            }
+
+            if (featherCooldown > 0) {
+                featherCooldown -= dt;
+                document.getElementById('slot-w').classList.add('cooldown');
+            } else document.getElementById('slot-w').classList.remove('cooldown');
+            
+            if (vortexCooldown > 0) {
+                vortexCooldown -= dt;
+                document.getElementById('slot-e').classList.add('cooldown');
+            } else document.getElementById('slot-e').classList.remove('cooldown');
+
+            if (beamCooldown > 0) {
+                beamCooldown -= dt;
+                document.getElementById('slot-r').classList.add('cooldown');
+            } else document.getElementById('slot-r').classList.remove('cooldown');
+
+            if (tornadoCooldown > 0) {
+                tornadoCooldown -= dt;
+                document.getElementById('slot-t').classList.add('cooldown');
+            } else document.getElementById('slot-t').classList.remove('cooldown');
+            
+            // Update Projectiles
+            for (let i = projectiles.length - 1; i >= 0; i--) {
+                let p = projectiles[i];
+                if (p.vx) p.group.position.x += p.vx * dt;
+                if (p.vz) p.group.position.z += p.vz * dt;
+
+                if (p.type === 'feather_storm') {
+                    p.circle.rotation.z += dt * 5;
+                    p.circle.scale.setScalar(1 + Math.sin(time * 15)*0.1);
+
+                    p.tick -= dt;
+                    if (p.tick <= 0) {
+                        p.tick = 0.1; // Hit extremely fast! 0.1s
+                        
+                        // Rain multiple feathers per tick
+                        for(let fNum=0; fNum<3; fNum++) {
+                            const f = new THREE.Mesh(new THREE.ConeGeometry(0.3, 2, 4), new THREE.MeshBasicMaterial({color: 0xffffff}));
+                            f.position.set(p.x + (Math.random()-0.5)*16, 25, p.z + (Math.random()-0.5)*16);
+                            f.rotation.x = Math.PI; // point down
+                            scene.add(f);
+                            clickIndicators.push({ mesh: f, life: 0.4, maxLife: 0.4, isFeather: true }); 
+                        }
+                        
+                        targetDummies.forEach(d => {
+                            const dist = Math.hypot(p.x - d.mesh.position.x, p.z - d.mesh.position.z);
+                            if (dist < 10) {
+                                d.hitTimer = 0.15;
+                                d.knockbackVx += (Math.random()-0.5) * 15;
+                                d.knockbackVz += (Math.random()-0.5) * 15;
+                            }
+                        });
+                    }
+                    if (p.life <= 0) scene.remove(p.circle);
+                } else if (p.type === 'vortex') {
+                    // Spin and chaotic scale visual
+                    p.group.children.forEach(c => {
+                        if (c.userData.rx) {
+                            c.rotation.x += c.userData.rx * dt;
+                            c.rotation.y += c.userData.ry * dt;
+                            c.rotation.z += c.userData.rz * dt;
+                            c.scale.setScalar(1 + Math.sin(time*20 + c.userData.rx)*0.2);
+                        }
+                    });
+                    
+                    // Suck dummies
+                    targetDummies.forEach(d => {
+                        const dx = p.group.position.x - d.mesh.position.x;
+                        const dz = p.group.position.z - d.mesh.position.z;
+                        const dist = Math.hypot(dx, dz);
+                        if (dist < 30 && dist > 2) { 
+                            d.knockbackVx += (dx / dist) * 60 * dt;
+                            d.knockbackVz += (dz / dist) * 60 * dt;
+                            d.knockbackVy += 20 * dt; // Lifting suction
+                        }
+                    });
+                } else if (p.type === 'beam') {
+                    // Fade visual and pulsate wildly
+                    p.group.children[0].material.opacity = p.life / p.maxLife;
+                    p.group.children[0].scale.setScalar(1 + Math.sin(p.life * 50)*0.5); 
+                    
+                    targetDummies.forEach(d => {
+                        const dx = d.mesh.position.x - p.group.position.x;
+                        const dz = d.mesh.position.z - p.group.position.z;
+                        const angleToDummy = Math.atan2(dx, dz);
+                        const dist = Math.hypot(dx, dz);
+                        
+                        let angleDiff = Math.abs(beamTargetAngle - angleToDummy);
+                        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+                        
+                        const perpDist = Math.abs(Math.sin(angleDiff) * dist);
+                        if (perpDist < 3.5 && Math.cos(angleDiff) > 0) {
+                            d.hitTimer = 0.3; // Huge hit
+                            d.knockbackVx = Math.sin(beamTargetAngle) * 80;
+                            d.knockbackVz = Math.cos(beamTargetAngle) * 80;
+                        }
+                    });
+                } else if (p.type === 'tornado') {
+                    // Update massive particle tower
+                    p.particles.forEach(part => {
+                        part.ang += dt * 15; // Fast spin
+                        const r = 2 + (part.h / 25) * 8; // Wider at top
+                        part.mesh.position.x = Math.sin(part.ang) * r;
+                        part.mesh.position.z = Math.cos(part.ang) * r;
+                        part.mesh.rotation.y = -part.ang;
+                    });
+                    
+                    targetDummies.forEach(d => {
+                        const dist = Math.hypot(p.group.position.x - d.mesh.position.x, p.group.position.z - d.mesh.position.z);
+                        if (dist < 10) {
+                            d.hitTimer = 0.15;
+                            // Launch upwards (Gravity will handle pulling them back down)
+                            d.knockbackVy += 60 * dt; 
+                            d.knockbackVx += (Math.random()-0.5) * 20;
+                            d.knockbackVz += (Math.random()-0.5) * 20;
+                        }
+                    });
+                } else if (p.type === 'fog') {
+                    // Dynamic Fog Swirl Logic
+                    p.fogParticles.forEach(fp => {
+                        fp.angleOffset += fp.swirlSpeed * dt;
+                        const r = fp.radiusStart + (p.maxLife - p.life) * fp.expansionRate;
+                        
+                        // Chaotic local swirling orbit
+                        fp.mesh.position.x = Math.sin(fp.angleOffset) * r;
+                        fp.mesh.position.y = Math.cos(fp.angleOffset * 1.2) * (r * 0.5); 
+                        fp.mesh.position.z = Math.cos(fp.angleOffset * 1.5) * r;
+                        
+                        // Grow over time
+                        const s = 1.0 + (p.maxLife - p.life) * fp.scaleRate;
+                        fp.mesh.scale.set(s, s, s);
+                        
+                        // Fade out near end of life
+                        fp.mesh.material.opacity = (p.life / p.maxLife) * 0.8;
+                        fp.mesh.rotation.x += dt * 2;
+                        fp.mesh.rotation.y += dt * 2;
+                    });
+                    
+                    // Fog Tree Destruction (Hits multiple targets continuously as it expands)
+                    const currentRadius = 4.0 + (p.maxLife - p.life) * 4.0;
+                    for (let tree of treeObjects) {
+                        if (!tree.active) continue;
+                        const distToTree = Math.hypot(p.group.position.x - tree.x, p.group.position.z - tree.z);
+                        if (distToTree < tree.radius + currentRadius) {
+                            tree.active = false;
+                            fallingTrees.push({
+                                group: tree.group,
+                                life: 1.5,
+                                vx: (p.vx / 35) * 2.0 + (Math.random() - 0.5), 
+                                vz: (p.vz / 35) * 2.0 + (Math.random() - 0.5)
+                            });
+                        }
+                    }
+                    
+                    // Target Dummies Fog Feedback
+                    targetDummies.forEach(d => {
+                        const distToDummy = Math.hypot(p.group.position.x - d.mesh.position.x, p.group.position.z - d.mesh.position.z);
+                        if (distToDummy < currentRadius && p.life > 0) {
+                            d.hitTimer = 0.15; // Shakes rapidly while inside fog
+                        }
+                    });
+                    
+                } else if (p.type === 'spike') {
+                    // Target Dummies Spike Collision
+                    targetDummies.forEach(d => {
+                        const distToDummy = Math.hypot(p.group.position.x - d.mesh.position.x, p.group.position.z - d.mesh.position.z);
+                        if (distToDummy < 3.5 && p.life > 0) {
+                            d.hitTimer = 0.15; 
+                            p.life = 0; // Spike shatters on impact
+                        }
+                    });
+                    
+                    // Tree Collision Check for Spike
+                    for (let tree of treeObjects) {
+                        if (!tree.active) continue;
+                        const distToTree = Math.hypot(p.group.position.x - tree.x, p.group.position.z - tree.z);
+                        if (distToTree < tree.radius + 3.0) { 
+                            tree.active = false; 
+                            fallingTrees.push({
+                                group: tree.group,
+                                life: 1.5,
+                                vx: (p.vx / 60) * 2.0 + (Math.random() - 0.5), 
+                                vz: (p.vz / 60) * 2.0 + (Math.random() - 0.5)
+                            });
+                        }
+                    }
+
+                    p.particles.forEach(part => {
+                        part.mesh.position.x += part.vx * dt;
+                        part.mesh.position.y += part.vy * dt;
+                        part.mesh.position.z += part.vz * dt;
+                    });
+                }
+
+                p.life -= dt;
+                if (p.life <= 0) {
+                    scene.remove(p.group);
+                    projectiles.splice(i, 1);
+                }
+            }
+
+            // Update Falling Trees (Break Animation)
+            for (let i = fallingTrees.length - 1; i >= 0; i--) {
+                let ft = fallingTrees[i];
+                
+                if (ft.life > 0) {
+                    // Tree falls over dynamically based on impact velocity
+                    ft.group.rotation.x += ft.vx * dt;
+                    ft.group.rotation.z += ft.vz * dt;
+                    ft.life -= dt;
+                } else {
+                    // Once fallen, sink into the ground
+                    ft.group.position.y -= 8 * dt;
+                    if (ft.group.position.y < -15) {
+                        scene.remove(ft.group); // Cleanup memory
+                        fallingTrees.splice(i, 1);
+                    }
+                }
+            }
+
+            // Update Click Indicators
+            for (let i = clickIndicators.length - 1; i >= 0; i--) {
+                let ind = clickIndicators[i];
+                ind.life -= dt;
+                
+                if (ind.isFeather) {
+                    ind.mesh.position.y -= dt * 50; // Fall fast
+                } else {
+                    const scale = 1 + (0.4 - ind.life) * 8;
+                    ind.mesh.scale.set(scale, scale, scale);
+                }
+                
+                ind.mesh.material.opacity = ind.life / ind.maxLife;
+                if (ind.life <= 0) {
+                    scene.remove(ind.mesh);
+                    clickIndicators.splice(i, 1);
+                }
+            }
+
+            // Camera Tracking with Shake
+            let shakeX = 0, shakeZ = 0;
+            if (cameraShake > 0) {
+                cameraShake -= dt;
+                shakeX = (Math.random() - 0.5) * 6; // Violent shake
+                shakeZ = (Math.random() - 0.5) * 6;
+            }
+            const camOffsetZ = 45; // Zoomed out further
+            const camOffsetY = 50; // Zoomed up higher
+            camera.position.x += (playerGroup.position.x + shakeX - camera.position.x) * 5 * dt;
+            camera.position.y += (playerGroup.position.y + camOffsetY - camera.position.y) * 5 * dt;
+            camera.position.z += (playerGroup.position.z + camOffsetZ + shakeZ - camera.position.z) * 5 * dt;
+            camera.lookAt(playerGroup.position);
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
