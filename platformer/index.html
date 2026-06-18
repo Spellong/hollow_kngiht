@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ethereal</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@200;400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    
+    <div id="ui-layer">
+        <!-- Main Menu -->
+        <div id="menu" class="screen active">
+            <h1 class="glow-text">ETHEREAL</h1>
+            <p class="subtitle">Press Space to Awaken</p>
+        </div>
+
+        <!-- Level Transition Screen -->
+        <div id="transition-screen" class="screen">
+            <h2 id="level-title"></h2>
+        </div>
+
+        <!-- Fade Overlay -->
+        <div id="fade-overlay"></div>
+    </div>
+
+    <script src="main.js"></script>
+</body>
+</html>
